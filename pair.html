@@ -1,1 +1,152 @@
-
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+    <title>Connect - Couple App</title>
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+    <div class="container">
+        <div class="card">
+            <h2>Connect with Your Love </h2>
+            
+            <div class="pair-options">
+                <button id="create-couple-btn" class="btn btn-outline">Create New Couple</button>
+                <button id="join-couple-btn" class="btn btn-outline">Join Existing Couple</button>
+            </div>
+            
+            <div id="create-section" class="hidden">
+                <h3>Create Your Couple</h3>
+                <label>When did you start dating?</label>
+                <input type="date" id="start-date" required>
+                <button id="create-submit" class="btn btn-primary">Create</button>
+            </div>
+            
+            <div id="join-section" class="hidden">
+                <h3>Join Your Partner</h3>
+                <label>Enter Pair Code</label>
+                <input type="text" id="pair-code" placeholder="e.g., LOVE123" maxlength="8">
+                <button id="join-submit" class="btn btn-primary">Join</button>
+            </div>
+            
+            <div id="code-display" class="hidden">
+                <h3>Your Pair Code</h3>
+                <div class="code-box" id="generated-code"></div>
+                <p>Share this code with your partner</p>
+                <button id="copy-code" class="btn btn-secondary">Copy Code</button>
+                <button id="goto-dashboard" class="btn btn-primary">Go to Dashboard</button>
+            </div>
+            
+            <div id="message" class="message"></div>
+        </div>
+    </div>
+    
+    <script type="module">
+        import { supabase, getCurrentUserProfile } from './supabase.js';
+        
+        let currentUser = null;
+        let generatedCode = null;
+        
+        // Check if already paired
+        const profile = await getCurrentUserProfile();
+        if (profile?.couple_id) {
+            window.location.href = 'dashboard.html';
+        }
+        
+        const { data: { user } } = await supabase.auth.getUser();
+        currentUser = user;
+        
+        // Show/hide sections
+        document.getElementById('create-couple-btn').onclick = () => {
+            document.getElementById('create-section').classList.remove('hidden');
+            document.getElementById('join-section').classList.add('hidden');
+            document.getElementById('code-display').classList.add('hidden');
+        };
+        
+        document.getElementById('join-couple-btn').onclick = () => {
+            document.getElementById('join-section').classList.remove('hidden');
+            document.getElementById('create-section').classList.add('hidden');
+            document.getElementById('code-display').classList.add('hidden');
+        };
+        
+        // Create couple
+        document.getElementById('create-submit').onclick = async () => {
+            const startDate = document.getElementById('start-date').value;
+            if (!startDate) {
+                document.getElementById('message').textContent = 'Please select start date';
+                return;
+            }
+            
+            // Generate random 6-digit code
+            const code = Math.random().toString(36).substring(2, 8).toUpperCase();
+            generatedCode = code;
+            
+            // Create couple
+            const { data: couple, error } = await supabase
+                .from('couples')
+                .insert({ pair_code: code, start_date: startDate })
+                .select()
+                .single();
+            
+            if (error) {
+                document.getElementById('message').textContent = error.message;
+                return;
+            }
+            
+            // Update user profile
+            await supabase
+                .from('profiles')
+                .update({ couple_id: couple.id })
+                .eq('id', currentUser.id);
+            
+            // Show code
+            document.getElementById('generated-code').textContent = code;
+            document.getElementById('code-display').classList.remove('hidden');
+            document.getElementById('create-section').classList.add('hidden');
+        };
+        
+        // Join couple
+        document.getElementById('join-submit').onclick = async () => {
+            const code = document.getElementById('pair-code').value.toUpperCase();
+            if (!code) {
+                document.getElementById('message').textContent = 'Please enter pair code';
+                return;
+            }
+            
+            // Find couple by code
+            const { data: couple, error } = await supabase
+                .from('couples')
+                .select()
+                .eq('pair_code', code)
+                .single();
+            
+            if (error || !couple) {
+                document.getElementById('message').textContent = 'Invalid pair code';
+                return;
+            }
+            
+            // Update user profile
+            await supabase
+                .from('profiles')
+                .update({ couple_id: couple.id })
+                .eq('id', currentUser.id);
+            
+            document.getElementById('message').textContent = 'Successfully connected!';
+            setTimeout(() => {
+                window.location.href = 'dashboard.html';
+            }, 1500);
+        };
+        
+        // Copy code
+        document.getElementById('copy-code').onclick = () => {
+            navigator.clipboard.writeText(generatedCode);
+            document.getElementById('message').textContent = 'Code copied!';
+        };
+        
+        document.getElementById('goto-dashboard').onclick = () => {
+            window.location.href = 'dashboard.html';
+        };
+    </script>
+</body>
+  </html>
