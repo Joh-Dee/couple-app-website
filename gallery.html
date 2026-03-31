@@ -1,1 +1,202 @@
-
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+    <title>Gallery - Couple App</title>
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+    <div class="container">
+        <!-- Bottom Navigation -->
+        <div class="bottom-nav">
+            <a href="dashboard.html" class="nav-item">
+                <span class="nav-icon">🏠</span>
+                <span>Home</span>
+            </a>
+            <a href="gallery.html" class="nav-item active">
+                <span class="nav-icon">📸</span>
+                <span>Gallery</span>
+            </a>
+            <a href="profile.html" class="nav-item">
+                <span class="nav-icon">👤</span>
+                <span>Profile</span>
+            </a>
+        </div>
+        
+        <!-- Main Content -->
+        <div class="content">
+            <div class="header">
+                <h1>Our Gallery 📸</h1>
+                <button id="new-post-btn" class="btn-small">+ New Post</button>
+            </div>
+            
+            <!-- New Post Modal -->
+            <div id="post-modal" class="modal hidden">
+                <div class="modal-content">
+                    <span class="close">&times;</span>
+                    <h3>Share a Memory</h3>
+                    <input type="file" id="post-image" accept="image/*">
+                    <textarea id="post-caption" placeholder="Write something..."></textarea>
+                    <button id="submit-post" class="btn btn-primary">Post</button>
+                    <div id="upload-progress" class="hidden">Uploading...</div>
+                </div>
+            </div>
+            
+            <!-- Posts Feed -->
+            <div id="posts-feed" class="posts-feed">
+                <div class="loading">Loading memories...</div>
+            </div>
+        </div>
+    </div>
+    
+    <script type="module">
+        import { supabase, getCurrentUserProfile } from './supabase.js';
+        
+        let currentUser = null;
+        let currentProfile = null;
+        let coupleId = null;
+        
+        currentProfile = await getCurrentUserProfile();
+        if (!currentProfile) {
+            window.location.href = 'login.html';
+        }
+        
+        coupleId = currentProfile.couple_id;
+        if (!coupleId) {
+            window.location.href = 'pair.html';
+        }
+        
+        const { data: { user } } = await supabase.auth.getUser();
+        currentUser = user;
+        
+        // Get bucket URL
+        const SUPABASE_URL = 'https://krqcytibuakcjcypyywu.supabase.co';
+        
+        // Load posts
+        async function loadPosts() {
+            const { data: posts } = await supabase
+                .from('posts')
+                .select('*, profiles!user_id(username)')
+                .eq('couple_id', coupleId)
+                .order('created_at', { ascending: false });
+            
+            const feed = document.getElementById('posts-feed');
+            if (!posts || posts.length === 0) {
+                feed.innerHTML = '<div class="empty-message">No memories yet. Create your first post!</div>';
+                return;
+            }
+            
+            feed.innerHTML = posts.map(post => {
+                const isMe = post.user_id === currentUser.id;
+                const name = isMe ? 'You' : (post.profiles?.username || 'Partner');
+                const time = new Date(post.created_at).toLocaleString();
+                const imageUrl = post.image_url || '';
+                
+                return `
+                    <div class="post-card">
+                        ${imageUrl ? `<img src="${imageUrl}" class="post-image" loading="lazy">` : ''}
+                        <div class="post-caption">${escapeHtml(post.caption || 'No caption')}</div>
+                        <div class="post-meta">${name} • ${time}</div>
+                    </div>
+                `;
+            }).join('');
+        }
+        
+        function escapeHtml(text) {
+            const div = document.createElement('div');
+            div.textContent = text;
+            return div.innerHTML;
+        }
+        
+        // Upload image to Supabase Storage
+        async function uploadImage(file, fileName) {
+            const { data, error } = await supabase.storage
+                .from('posts')
+                .upload(fileName, file);
+            
+            if (error) throw error;
+            
+            // Get public URL
+            const { data: { publicUrl } } = supabase.storage
+                .from('posts')
+                .getPublicUrl(fileName);
+            
+            return publicUrl;
+        }
+        
+        // Submit new post
+        document.getElementById('submit-post').onclick = async () => {
+            const fileInput = document.getElementById('post-image');
+            const caption = document.getElementById('post-caption').value;
+            const progress = document.getElementById('upload-progress');
+            
+            if (!fileInput.files[0]) {
+                alert('Please select an image');
+                return;
+            }
+            
+            progress.classList.remove('hidden');
+            
+            try {
+                const file = fileInput.files[0];
+                const fileName = `${coupleId}/${Date.now()}_${file.name}`;
+                
+                // Upload image
+                const imageUrl = await uploadImage(file, fileName);
+                
+                // Save post to database
+                const { error } = await supabase
+                    .from('posts')
+                    .insert({
+                        couple_id: coupleId,
+                        user_id: currentUser.id,
+                        image_url: imageUrl,
+                        caption: caption
+                    });
+                
+                if (error) throw error;
+                
+                // Close modal and refresh
+                document.getElementById('post-modal').classList.add('hidden');
+                document.getElementById('post-image').value = '';
+                document.getElementById('post-caption').value = '';
+                await loadPosts();
+                
+            } catch (error) {
+                alert('Upload failed: ' + error.message);
+            } finally {
+                progress.classList.add('hidden');
+            }
+        };
+        
+        // Modal handling
+        const modal = document.getElementById('post-modal');
+        document.getElementById('new-post-btn').onclick = () => {
+            modal.classList.remove('hidden');
+        };
+        document.querySelector('.close').onclick = () => {
+            modal.classList.add('hidden');
+        };
+        window.onclick = (e) => {
+            if (e.target === modal) modal.classList.add('hidden');
+        };
+        
+        // Real-time new posts
+        supabase
+            .channel('posts')
+            .on('postgres_changes', {
+                event: 'INSERT',
+                schema: 'public',
+                table: 'posts',
+                filter: `couple_id=eq.${coupleId}`
+            }, () => {
+                loadPosts();
+            })
+            .subscribe();
+        
+        // Load initial posts
+        await loadPosts();
+    </script>
+</body>
+</html>
