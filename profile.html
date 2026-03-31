@@ -1,1 +1,125 @@
-
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+    <title>Profile - Couple App</title>
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+    <div class="container">
+        <!-- Bottom Navigation -->
+        <div class="bottom-nav">
+            <a href="dashboard.html" class="nav-item">
+                <span class="nav-icon"></span>
+                <span>Home</span>
+            </a>
+            <a href="gallery.html" class="nav-item">
+                <span class="nav-icon"></span>
+                <span>Gallery</span>
+            </a>
+            <a href="profile.html" class="nav-item active">
+                <span class="nav-icon"></span>
+                <span>Profile</span>
+            </a>
+        </div>
+        
+        <!-- Main Content -->
+        <div class="content">
+            <div class="header">
+                <h1>Profile</h1>
+            </div>
+            
+            <div class="card">
+                <div class="avatar-placeholder"></div>
+                
+                <div class="form-group">
+                    <label>Username</label>
+                    <input type="text" id="username" placeholder="Enter your name">
+                </div>
+                
+                <button id="update-profile" class="btn btn-primary">Update Profile</button>
+                
+                <hr>
+                
+                <div class="partner-info">
+                    <h3>Your Partner</h3>
+                    <div id="partner-display">Loading...</div>
+                </div>
+                
+                <hr>
+                
+                <button id="logout-btn" class="btn btn-secondary">Logout</button>
+            </div>
+        </div>
+    </div>
+    
+    <script type="module">
+        import { supabase, getCurrentUserProfile } from './supabase.js';
+        
+        let currentUser = null;
+        let currentProfile = null;
+        let coupleId = null;
+        
+        currentProfile = await getCurrentUserProfile();
+        if (!currentProfile) {
+            window.location.href = 'login.html';
+        }
+        
+        coupleId = currentProfile.couple_id;
+        
+        const { data: { user } } = await supabase.auth.getUser();
+        currentUser = user;
+        
+        // Load current username
+        document.getElementById('username').value = currentProfile.username || '';
+        
+        // Update profile
+        document.getElementById('update-profile').onclick = async () => {
+            const username = document.getElementById('username').value;
+            
+            const { error } = await supabase
+                .from('profiles')
+                .update({ username: username })
+                .eq('id', currentUser.id);
+            
+            if (error) {
+                alert('Update failed: ' + error.message);
+            } else {
+                alert('Profile updated!');
+            }
+        };
+        
+        // Load partner info
+        if (coupleId) {
+            const { data: partner } = await supabase
+                .from('profiles')
+                .select('username')
+                .eq('couple_id', coupleId)
+                .neq('id', currentUser.id)
+                .single();
+            
+            if (partner) {
+                document.getElementById('partner-display').innerHTML = `
+                    <div class="partner-card">
+                        <div class="partner-avatar"></div>
+                        <div class="partner-name">${partner.username || 'My Love'}</div>
+                    </div>
+                `;
+            } else {
+                document.getElementById('partner-display').innerHTML = '<p>Not connected yet. Go to Pair page.</p>';
+                document.getElementById('partner-display').innerHTML += '<br><a href="pair.html" class="btn-small">Connect Now</a>';
+            }
+        } else {
+            document.getElementById('partner-display').innerHTML = '<p>Not connected yet. Go to Pair page.</p>';
+            document.getElementById('partner-display').innerHTML += '<br><a href="pair.html" class="btn-small">Connect Now</a>';
+        }
+        
+        // Logout
+        document.getElementById('logout-btn').onclick = async () => {
+            await supabase.auth.signOut();
+            window.location.href = 'index.html';
+        };
+    </script>
+</body>
+</html>
