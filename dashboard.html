@@ -1,1 +1,210 @@
-
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+    <title>Dashboard - Couple App</title>
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+    <div class="container">
+        <!-- Bottom Navigation -->
+        <div class="bottom-nav">
+            <a href="dashboard.html" class="nav-item active">
+                <span class="nav-icon">🏠</span>
+                <span>Home</span>
+            </a>
+            <a href="gallery.html" class="nav-item">
+                <span class="nav-icon">📸</span>
+                <span>Gallery</span>
+            </a>
+            <a href="profile.html" class="nav-item">
+                <span class="nav-icon">👤</span>
+                <span>Profile</span>
+            </a>
+        </div>
+        
+        <!-- Main Content -->
+        <div class="content">
+            <div class="header">
+                <h1>My Love 💕</h1>
+                <div id="partner-name" class="partner-name">Loading...</div>
+            </div>
+            
+            <!-- Timeline Card -->
+            <div class="card timeline-card">
+                <h3>Together for</h3>
+                <div class="timeline">
+                    <div class="timeline-number" id="days-count">0</div>
+                    <div class="timeline-label">Days</div>
+                </div>
+                <div class="timeline-details">
+                    <span id="years">0</span> years, 
+                    <span id="months">0</span> months, 
+                    <span id="days">0</span> days
+                </div>
+            </div>
+            
+            <!-- Buzz Button -->
+            <div class="buzz-container">
+                <button id="buzz-btn" class="buzz-btn">
+                    <span class="buzz-icon">💕</span>
+                    <span>BUZZ</span>
+                </button>
+                <p class="buzz-hint">Tap to send love to your partner</p>
+            </div>
+            
+            <!-- Recent Buzzes -->
+            <div class="card">
+                <h3>Recent Buzzes</h3>
+                <div id="recent-buzzes" class="buzz-list">
+                    <p class="empty-message">No buzzes yet. Send one!</p>
+                </div>
+            </div>
+        </div>
+    </div>
+    
+    <div id="notification" class="notification hidden">💕 Love Buzz! 💕</div>
+    
+    <script type="module">
+        import { supabase, getCurrentUserProfile } from './supabase.js';
+        
+        let currentUser = null;
+        let currentProfile = null;
+        let coupleId = null;
+        
+        // Check auth and get profile
+        currentProfile = await getCurrentUserProfile();
+        if (!currentProfile) {
+            window.location.href = 'login.html';
+        }
+        
+        coupleId = currentProfile.couple_id;
+        if (!coupleId) {
+            window.location.href = 'pair.html';
+        }
+        
+        const { data: { user } } = await supabase.auth.getUser();
+        currentUser = user;
+        
+        // Get partner info
+        const { data: partnerProfile } = await supabase
+            .from('profiles')
+            .select('*, auth.users(email)')
+            .eq('couple_id', coupleId)
+            .neq('id', currentUser.id)
+            .single();
+        
+        if (partnerProfile) {
+            document.getElementById('partner-name').textContent = partnerProfile.username || 'My Love';
+        }
+        
+        // Get couple info for timeline
+        const { data: couple } = await supabase
+            .from('couples')
+            .select()
+            .eq('id', coupleId)
+            .single();
+        
+        // Calculate timeline
+        function calculateTimeline(startDate) {
+            const start = new Date(startDate);
+            const today = new Date();
+            const diffDays = Math.floor((today - start) / (1000 * 60 * 60 * 24));
+            const years = Math.floor(diffDays / 365);
+            const months = Math.floor((diffDays % 365) / 30);
+            const days = diffDays % 30;
+            return { totalDays: diffDays, years, months, days };
+        }
+        
+        if (couple) {
+            const timeline = calculateTimeline(couple.start_date);
+            document.getElementById('days-count').textContent = timeline.totalDays;
+            document.getElementById('years').textContent = timeline.years;
+            document.getElementById('months').textContent = timeline.months;
+            document.getElementById('days').textContent = timeline.days;
+        }
+        
+        // Load recent buzzes
+        async function loadBuzzes() {
+            const { data: buzzes } = await supabase
+                .from('buzz_events')
+                .select('*, profiles!from_user_id(username)')
+                .eq('couple_id', coupleId)
+                .order('created_at', { ascending: false })
+                .limit(10);
+            
+            const container = document.getElementById('recent-buzzes');
+            if (!buzzes || buzzes.length === 0) {
+                container.innerHTML = '<p class="empty-message">No buzzes yet. Send one!</p>';
+                return;
+            }
+            
+            container.innerHTML = buzzes.map(buzz => {
+                const isMe = buzz.from_user_id === currentUser.id;
+                const name = isMe ? 'You' : (buzz.profiles?.username || 'Partner');
+                const time = new Date(buzz.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+                return `<div class="buzz-item">💕 ${name} sent love at ${time}</div>`;
+            }).join('');
+        }
+        
+        await loadBuzzes();
+        
+        // Send buzz
+        document.getElementById('buzz-btn').onclick = async () => {
+            // Disable button briefly to prevent spam
+            const btn = document.getElementById('buzz-btn');
+            btn.disabled = true;
+            
+            const { error } = await supabase
+                .from('buzz_events')
+                .insert({ couple_id: coupleId, from_user_id: currentUser.id });
+            
+            if (!error) {
+                // Show vibration if supported
+                if (window.navigator.vibrate) {
+                    window.navigator.vibrate(200);
+                }
+                
+                // Refresh buzz list
+                await loadBuzzes();
+                
+                // Show notification on own device
+                showNotification('💕 Buzz sent to your partner!');
+            }
+            
+            setTimeout(() => { btn.disabled = false; }, 2000);
+        };
+        
+        // Real-time listen for buzzes
+        supabase
+            .channel('buzzes')
+            .on('postgres_changes', {
+                event: 'INSERT',
+                schema: 'public',
+                table: 'buzz_events',
+                filter: `couple_id=eq.${coupleId}`
+            }, (payload) => {
+                const newBuzz = payload.new;
+                if (newBuzz.from_user_id !== currentUser.id) {
+                    // Partner sent buzz
+                    showNotification('💕 Your partner sent you love! 💕');
+                    if (window.navigator.vibrate) {
+                        window.navigator.vibrate([200, 100, 200]);
+                    }
+                    loadBuzzes();
+                }
+            })
+            .subscribe();
+        
+        function showNotification(message) {
+            const notif = document.getElementById('notification');
+            notif.textContent = message;
+            notif.classList.remove('hidden');
+            setTimeout(() => {
+                notif.classList.add('hidden');
+            }, 3000);
+        }
+    </script>
+</body>
+</html>
