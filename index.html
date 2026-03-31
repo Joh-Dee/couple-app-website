@@ -1,1 +1,32 @@
 
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+    <title>Couple App </title>
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+    <div class="container">
+        <div class="splash-screen">
+            <div class="heart"></div>
+            <h1>Our Love Story</h1>
+            <p>For you and me</p>
+            <div class="buttons">
+                <a href="login.html" class="btn btn-primary">Get Started</a>
+            </div>
+        </div>
+    </div>
+    
+    <script type="module">
+        import { checkAuth } from './supabase.js';
+        
+        // Check if already logged in
+        const user = await checkAuth();
+        if (user) {
+            window.location.href = 'dashboard.html';
+        }
+    </script>
+</body>
+</html>
